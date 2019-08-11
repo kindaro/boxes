@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 import Test.QuickCheck
 import Text.PrettyPrint.Boxes
 
@@ -10,6 +12,8 @@ import System.Exit (exitFailure, exitSuccess)
 #if MIN_VERSION_base(4,11,0)
 import Prelude hiding ((<>))
 #endif
+
+import Data.Text.Arbitrary ()
 
 instance Arbitrary Alignment where
   arbitrary = elements [ AlignFirst
@@ -56,7 +60,7 @@ arbContent n =
 -- extensional equivalence for Boxes
 b1 ==== b2 = render b1 == render b2
 
-prop_render_text s = render (text s) == (s ++ "\n")
+prop_render_text s = render (text s) == (s `mappend` "\n")
 
 prop_empty_right_id b = b <> nullBox ==== b
 prop_empty_left_id b  = nullBox <> b ==== b

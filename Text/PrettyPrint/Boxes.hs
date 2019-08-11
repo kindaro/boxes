@@ -1,4 +1,5 @@
 {-# LANGUAGE CPP #-}
+{-# LANGUAGE OverloadedStrings #-}
 #include "boxes.h"
 
 -----------------------------------------------------------------------------
@@ -103,6 +104,10 @@ import Data.List (foldl', intersperse)
 
 import Data.List.Split (chunksOf)
 
+import Data.Text (Text)
+import qualified Data.Text as Text
+import qualified Data.Text.IO as Text
+
 -- | The basic data type.  A box has a specified size and some sort of
 --   contents.
 data Box = Box { rows    :: Int
@@ -114,7 +119,7 @@ data Box = Box { rows    :: Int
 #ifdef OVERLOADED_STRINGS
 -- | Convenient ability to use bare string literals as boxes.
 instance IsString Box where
-  fromString = text
+  fromString = text . Text.pack
 #endif
 
 -- | Data type for specifying the alignment of boxes.
@@ -152,7 +157,7 @@ center2    = AlignCenter2
 
 -- | Contents of a box.
 data Content = Blank        -- ^ No content.
-             | Text String  -- ^ A raw string.
+             | Text Text    -- ^ A raw string.
              | Row [Box]    -- ^ A row of sub-boxes.
              | Col [Box]    -- ^ A column of sub-boxes.
              | SubBox Alignment Alignment Box
@@ -173,11 +178,11 @@ emptyBox r c = Box r c Blank
 
 -- | A @1x1@ box containing a single character.
 char :: Char -> Box
-char c = Box 1 1 (Text [c])
+char c = Box 1 1 (Text (Text.singleton c))
 
 -- | A (@1 x len@) box containing a string of length @len@.
-text :: String -> Box
-text t = Box 1 (length t) (Text t)
+text :: Text -> Box
+text t = Box 1 (Text.length t) (Text t)
 
 -- | Paste two boxes together horizontally, using a default (top)
 --   alignment.
@@ -248,25 +253,25 @@ punctuateV a p bs = vcat a (intersperse p (toList bs))
 -- | @para algn w t@ is a box of width @w@, containing text @t@,
 --   aligned according to @algn@, flowed to fit within the given
 --   width.
-para :: Alignment -> Int -> String -> Box
+para :: Alignment -> Int -> Text -> Box
 para a n t = (\ss -> mkParaBox a (length ss) ss) $ flow n t
 
 -- | @columns w h t@ is a list of boxes, each of width @w@ and height
 --   at most @h@, containing text @t@ flowed into as many columns as
 --   necessary.
-columns :: Alignment -> Int -> Int -> String -> [Box]
+columns :: Alignment -> Int -> Int -> Text -> [Box]
 columns a w h t = map (mkParaBox a h) . chunksOf h $ flow w t
 
 -- | @mkParaBox a n s@ makes a box of height @n@ with the text @s@
 --   aligned according to @a@.
-mkParaBox :: Alignment -> Int -> [String] -> Box
+mkParaBox :: Alignment -> Int -> [Text] -> Box
 mkParaBox a n = alignVert top n . vcat a . map text
 
 -- | Flow the given text into the given width.
-flow :: Int -> String -> [String]
-flow n t = map (take n)
+flow :: Int -> Text -> [Text]
+flow n t = map (Text.take n)
          . getLines
-         $ foldl' addWordP (emptyPara n) (map mkWord . words $ t)
+         $ foldl' addWordP (emptyPara n) (map mkWord . Text.words $ t)
 
 data Para = Para { paraWidth   :: Int
                  , paraContent :: ParaContent
@@ -278,11 +283,11 @@ data ParaContent = Block { fullLines :: [Line]
 emptyPara :: Int -> Para
 emptyPara pw = Para pw (Block [] (Line 0 []))
 
-getLines :: Para -> [String]
+getLines :: Para -> [Text]
 getLines (Para _ (Block ls l))
   | lLen l == 0 = process ls
   | otherwise   = process (l:ls)
-  where process = map (unwords . reverse . map getWord . getWords) . reverse
+  where process = map (Text.unwords . reverse . map getWord . getWords) . reverse
 
 data Line = Line { lLen :: Int, getWords :: [Word] }
 
@@ -292,10 +297,10 @@ mkLine ws = Line (sum (map ((+1) . wLen) ws) - 1) ws
 startLine :: Word -> Line
 startLine = mkLine . (:[])
 
-data Word = Word { wLen :: Int, getWord  :: String }
+data Word = Word { wLen :: Int, getWord  :: Text }
 
-mkWord :: String -> Word
-mkWord w = Word (length w) w
+mkWord :: Text -> Word
+mkWord w = Word (Text.length w) w
 
 addWordP :: Para -> Word -> Para
 addWordP (Para pw (Block fl l)) w
@@ -357,10 +362,10 @@ moveRight n b = alignHoriz right (cols b + n) b
 --  Implementation  ------------------------------------------------------------
 --------------------------------------------------------------------------------
 
--- | Render a 'Box' as a String, suitable for writing to the screen or
+-- | Render a 'Box' as a Text, suitable for writing to the screen or
 --   a file.
-render :: Box -> String
-render = unlines . renderBox
+render :: Box -> Text
+render = Text.unlines . renderBox
 
 -- XXX make QC properties for takeP
 
@@ -390,12 +395,38 @@ takePA c b n = glue . (takeP b (numRev c n) *** takeP b (numFwd c n)) . split
         numRev AlignCenter1  n = (n+1) `div` 2
         numRev AlignCenter2  n = n `div` 2
 
+-- | \"Padded take\": @takePT a n xs@ is the same as @take n xs@, if @n
+--   <= length xs@; otherwise it is @xs@ followed by enough copies of
+--   @a@ to make the length equal to @n@.
+takePT :: Char -> Int -> Text -> Text
+takePT b n s | n <= 0    = Text.empty
+            | Text.null s = Text.replicate n (Text.singleton b)
+            | otherwise = s `mappend` Text.replicate (n - Text.length s) (Text.singleton b)
+
+-- | @takePA @ is like 'takePT', but with alignment.  That is, we
+--   imagine a copy of @xs@ extended infinitely on both sides with
+--   copies of @a@, and a window of size @n@ placed so that @xs@ has
+--   the specified alignment within the window; @takePTA algn a n xs@
+--   returns the contents of this window.
+takePTA :: Alignment -> Char -> Int -> Text -> Text
+takePTA c b n = glue . (takePT b (numRev c n) *** takePT b (numFwd c n)) . split
+  where split t = first Text.reverse . Text.splitAt (numRev c (Text.length t)) $ t
+        glue    = uncurry mappend . first Text.reverse
+        numFwd AlignFirst    n = n
+        numFwd AlignLast     _ = 0
+        numFwd AlignCenter1  n = n `div` 2
+        numFwd AlignCenter2  n = (n+1) `div` 2
+        numRev AlignFirst    _ = 0
+        numRev AlignLast     n = n
+        numRev AlignCenter1  n = (n+1) `div` 2
+        numRev AlignCenter2  n = n `div` 2
+
 -- | Generate a string of spaces.
-blanks :: Int -> String
-blanks = flip replicate ' '
+blanks :: Int -> Text
+blanks = flip Text.replicate " "
 
 -- | Render a box as a list of lines.
-renderBox :: Box -> [String]
+renderBox :: Box -> [Text]
 
 renderBox (Box r c Blank)            = resizeBox r c [""]
 renderBox (Box r c (Text t))         = resizeBox r c [t]
@@ -403,7 +434,7 @@ renderBox (Box r c (Row bs))         = resizeBox r c
                                        . merge
                                        . map (renderBoxWithRows r)
                                        $ bs
-                           where merge = foldr (zipWith (++)) (repeat [])
+                           where merge = foldr (zipWith mappend) (repeat Text.empty)
 
 renderBox (Box r c (Col bs))         = resizeBox r c
                                        . concatMap (renderBoxWithCols c)
@@ -414,21 +445,21 @@ renderBox (Box r c (SubBox ha va b)) = resizeBoxAligned r c ha va
                                        $ b
 
 -- | Render a box as a list of lines, using a given number of rows.
-renderBoxWithRows :: Int -> Box -> [String]
+renderBoxWithRows :: Int -> Box -> [Text]
 renderBoxWithRows r b = renderBox (b{rows = r})
 
 -- | Render a box as a list of lines, using a given number of columns.
-renderBoxWithCols :: Int -> Box -> [String]
+renderBoxWithCols :: Int -> Box -> [Text]
 renderBoxWithCols c b = renderBox (b{cols = c})
 
 -- | Resize a rendered list of lines.
-resizeBox :: Int -> Int -> [String] -> [String]
-resizeBox r c = takeP (blanks c) r . map (takeP ' ' c)
+resizeBox :: Int -> Int -> [Text] -> [Text]
+resizeBox r c = takeP (blanks c) r . map (takePT ' ' c)
 
 -- | Resize a rendered list of lines, using given alignments.
-resizeBoxAligned :: Int -> Int -> Alignment -> Alignment -> [String] -> [String]
-resizeBoxAligned r c ha va = takePA va (blanks c) r . map (takePA ha ' ' c)
+resizeBoxAligned :: Int -> Int -> Alignment -> Alignment -> [Text] -> [Text]
+resizeBoxAligned r c ha va = takePA va (blanks c) r . map (takePTA ha ' ' c)
 
 -- | A convenience function for rendering a box to stdout.
 printBox :: Box -> IO ()
-printBox = putStr . render
+printBox = Text.putStr . render
