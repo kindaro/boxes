@@ -401,7 +401,7 @@ takePA c b n = glue . (takeP b (numRev c n) *** takeP b (numFwd c n)) . split
 takePT :: Char -> Int -> Text -> Text
 takePT b n s | n <= 0    = Text.empty
             | Text.null s = Text.replicate n (Text.singleton b)
-            | otherwise = s `mappend` Text.replicate (n - Text.length s) (Text.singleton b)
+            | otherwise = s `Text.append` Text.replicate (n - Text.length s) (Text.singleton b)
 
 -- | @takePA @ is like 'takePT', but with alignment.  That is, we
 --   imagine a copy of @xs@ extended infinitely on both sides with
@@ -411,7 +411,7 @@ takePT b n s | n <= 0    = Text.empty
 takePTA :: Alignment -> Char -> Int -> Text -> Text
 takePTA c b n = glue . (takePT b (numRev c n) *** takePT b (numFwd c n)) . split
   where split t = first Text.reverse . Text.splitAt (numRev c (Text.length t)) $ t
-        glue    = uncurry mappend . first Text.reverse
+        glue    = uncurry Text.append . first Text.reverse
         numFwd AlignFirst    n = n
         numFwd AlignLast     _ = 0
         numFwd AlignCenter1  n = n `div` 2
@@ -434,7 +434,7 @@ renderBox (Box r c (Row bs))         = resizeBox r c
                                        . merge
                                        . map (renderBoxWithRows r)
                                        $ bs
-                           where merge = foldr (zipWith mappend) (repeat Text.empty)
+                           where merge = foldr (zipWith Text.append) (repeat Text.empty)
 
 renderBox (Box r c (Col bs))         = resizeBox r c
                                        . concatMap (renderBoxWithCols c)

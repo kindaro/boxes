@@ -13,6 +13,7 @@ import System.Exit (exitFailure, exitSuccess)
 import Prelude hiding ((<>))
 #endif
 
+import qualified Data.Text as Text
 import Data.Text.Arbitrary ()
 
 instance Arbitrary Alignment where
@@ -60,7 +61,7 @@ arbContent n =
 -- extensional equivalence for Boxes
 b1 ==== b2 = render b1 == render b2
 
-prop_render_text s = render (text s) == (s `mappend` "\n")
+prop_render_text s = render (text s) == (s `Text.append` "\n")
 
 prop_empty_right_id b = b <> nullBox ==== b
 prop_empty_left_id b  = nullBox <> b ==== b
